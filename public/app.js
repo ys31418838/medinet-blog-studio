@@ -89,21 +89,26 @@
     if (side.classList.contains("open") && !side.contains(e.target)) side.classList.remove("open");
   });
 
-  // ── 서버 상태 ──
+  // ── 서버 모드 / 브라우저 모드 ──
+  // start.bat 으로 켠 내 PC 서버가 있으면 "server", 없으면(GitHub Pages) 이 브라우저가 직접 AI·사진 검색에 연결하는 "browser"
+  let mode = "server";
   let serverKey = false;
   async function checkStatus() {
     const pill = $("#keyPill");
     try {
-      const s = await (await fetch("/api/status")).json();
+      const r = await fetch("api/status", { cache: "no-store" });
+      if (!r.ok) throw new Error(String(r.status));
+      const s = await r.json();
+      mode = "server";
       serverKey = s.serverKey;
       $("#promptInfo").textContent = `프롬프트 파일 위치: ${s.promptDir}${s.promptsOk ? "" : " (파일을 찾을 수 없습니다!)"} — 이 폴더의 .txt 를 고치면 다음 글부터 반영됩니다.`;
     } catch {
-      pill.textContent = "서버 꺼짐";
-      pill.className = "pill bad";
-      return;
+      mode = "browser";
+      serverKey = false;
+      $("#promptInfo").textContent = "브라우저 모드: 서버 없이 이 브라우저가 직접 AI에 연결합니다. API 키는 이 브라우저에만 저장되고, 프롬프트는 깃허브 저장소의 prompts 폴더를 읽습니다.";
     }
-    const ok = serverKey || settings.apiKey;
-    pill.textContent = ok ? "API 연결 준비됨" : "API 키 필요";
+    const ok = serverKey || validApiKey(settings.apiKey);
+    pill.textContent = ok ? (mode === "browser" ? "브라우저 모드 · 준비됨" : "API 연결 준비됨") : "API 키 필요";
     pill.className = `pill ${ok ? "ok" : "bad"}`;
     pill.onclick = ok ? null : () => go("settings");
   }
@@ -112,6 +117,99 @@
     ...(validApiKey(settings.apiKey) ? { "x-api-key": settings.apiKey } : {}),
     ...(settings.pexelsKey ? { "x-pexels-key": cleanKey(settings.pexelsKey) } : {}),
   });
+
+  const S = window.MedinetShared;
+  let sdkPromise = null;
+  const loadSdk = () =>
+    (sdkPromise ??= import("https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.8.0/+esm").then((m) => m.default));
+  async function loadPromptFile(name) {
+    const r = await fetch(`../prompts/${encodeURIComponent(name)}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(`프롬프트 파일을 불러올 수 없습니다: ${name}`);
+    return r.text();
+  }
+  async function browserClient() {
+    const Anthropic = await loadSdk();
+    return { Anthropic, client: new Anthropic({ apiKey: settings.apiKey, dangerouslyAllowBrowser: true }) };
+  }
+  const abortError = () => new DOMException("멈춤", "AbortError");
+
+  const api = {
+    // 글 생성: on.delta(text), on.status({text, searches}) 로 진행 상황을 받고, 끝나면 {sources, stop_reason} 을 돌려줍니다
+    async generate(body, on, signal) {
+      if (mode === "browser") {
+        const { Anthropic, client } = await browserClient();
+        const system = S.blogSystem(await loadPromptFile(S.BLOG_PROMPT_FILE), body.office);
+        try {
+          const r = await S.runBlog({ client, system, input: S.cleanInput(body), on, signal });
+          if (signal.aborted) throw abortError();
+          if (r.stop_reason === "refusal") throw new Error("이 주제는 작성이 거절되었습니다. 주제를 바꿔서 다시 시도해 주세요.");
+          return r;
+        } catch (err) {
+          if (signal.aborted || err.name === "AbortError") throw abortError();
+          if (err instanceof Anthropic.APIError || err instanceof Anthropic.AnthropicError) throw new Error(S.describeError(err, Anthropic));
+          throw err;
+        }
+      }
+      const res = await fetch("/api/generate", { method: "POST", headers: headers(), body: JSON.stringify(body), signal });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `서버 오류 (${res.status})`);
+      }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const chunk = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const ev = /^event: (.*)$/m.exec(chunk)?.[1];
+          const dataLine = /^data: (.*)$/m.exec(chunk)?.[1];
+          if (!ev || dataLine == null) continue;
+          const data = JSON.parse(dataLine);
+          if (ev === "delta") on.delta(data);
+          else if (ev === "status") on.status(data);
+          else if (ev === "done") return data;
+          else if (ev === "error") throw new Error(data.error);
+        }
+      }
+      throw new Error("연결이 중간에 끊겼습니다. 다시 시도해 주세요.");
+    },
+
+    async listings(text) {
+      if (mode === "browser") {
+        const { Anthropic, client } = await browserClient();
+        try {
+          const r = await S.runListings({ client, system: await loadPromptFile(S.LISTING_PROMPT_FILE), text });
+          if (r.stop_reason === "refusal") throw new Error("요청이 거절되었습니다. 텍스트를 확인해 주세요.");
+          return r.markdown;
+        } catch (err) {
+          if (err instanceof Anthropic.AnthropicError) throw new Error(S.describeError(err, Anthropic));
+          throw err;
+        }
+      }
+      const res = await fetch("/api/listings", { method: "POST", headers: headers(), body: JSON.stringify({ text }) });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "정리에 실패했어요");
+      return j.markdown;
+    },
+
+    async photos(query) {
+      try {
+        if (mode === "browser") return await S.searchPhotos(query, cleanKey(settings.pexelsKey));
+        const r = await fetch(`/api/photos?q=${encodeURIComponent(query)}`, { headers: headers() });
+        return r.ok ? (await r.json()).photos || [] : [];
+      } catch {
+        return [];
+      }
+    },
+
+    // 사진 주소: 서버 모드는 서버를 거쳐서, 브라우저 모드는 사진 사이트에서 바로(CORS 허용 사이트만) 받습니다
+    imgUrl: (src) => (mode === "browser" ? src : `/api/img?u=${encodeURIComponent(src)}`),
+  };
 
   // ── 결과 파싱 ──
   function tag(raw, name, partial = false) {
@@ -233,18 +331,12 @@
   const loadImg = (url) =>
     new Promise((resolve, reject) => {
       const img = new Image();
+      img.crossOrigin = "anonymous"; // 다른 사이트 사진도 로고 합성·저장이 되도록
       img.onload = () => resolve(img);
       img.onerror = reject;
       img.src = url;
     });
-  async function findPhotos(query) {
-    try {
-      const r = await fetch(`/api/photos?q=${encodeURIComponent(query)}`, { headers: headers() });
-      return r.ok ? (await r.json()).photos || [] : [];
-    } catch {
-      return [];
-    }
-  }
+  const findPhotos = (query) => api.photos(query);
   // start 번째 후보부터 차례로 받아 보고, 처음 성공한 사진으로 이미지를 만듭니다
   async function applyFoundPhoto(slot, start = 0) {
     const list = slot.photos || [];
@@ -252,7 +344,7 @@
       const i = (start + k) % list.length;
       for (const src of list[i].srcs) {
         try {
-          const img = await loadImg(`/api/img?u=${encodeURIComponent(src)}`);
+          const img = await loadImg(api.imgUrl(src));
           if (img.width < 400) continue;
           slot.canvas = slot.spec.kind === "cover"
             ? await MedinetImages.render(slot.spec, office(), img)
@@ -440,52 +532,31 @@
 
     let raw = "";
     let sources = [];
-    let finished = false;
     let searches = 0;
     let lastPaint = 0;
     controller = new AbortController();
     try {
-      const res = await fetch("/api/generate", { method: "POST", headers: headers(), body: JSON.stringify(body), signal: controller.signal });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error || `서버 오류 (${res.status})`);
-      }
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf("\n\n")) >= 0) {
-          const chunk = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
-          const ev = /^event: (.*)$/m.exec(chunk)?.[1];
-          const dataLine = /^data: (.*)$/m.exec(chunk)?.[1];
-          if (!ev || dataLine == null) continue;
-          const data = JSON.parse(dataLine);
-          if (ev === "delta") {
-            raw += data;
+      const result = await api.generate(
+        body,
+        {
+          delta(d) {
+            raw += d;
             const now = performance.now();
             if (now - lastPaint > 180) {
               lastPaint = now;
               showResult(raw, { streaming: true });
               setStatus(`<span class="spin"></span>글 쓰는 중… ${raw.length.toLocaleString()}자${searches ? ` · 자료 검색 ${searches}회` : ""}`);
             }
-          } else if (ev === "status") {
+          },
+          status(data) {
             searches = data.searches || searches;
             setStatus(`<span class="spin"></span>${esc(data.text)}`);
-          } else if (ev === "done") {
-            sources = data.sources || [];
-            finished = true;
-            if (data.stop_reason === "max_tokens") toast("글이 너무 길어 중간에 끊겼어요. 분량을 줄여 다시 시도해 보세요.");
-          } else if (ev === "error") {
-            throw new Error(data.error);
-          }
-        }
-      }
-      if (!finished) throw new Error("연결이 중간에 끊겼습니다. 다시 시도해 주세요.");
+          },
+        },
+        controller.signal
+      );
+      sources = result.sources || [];
+      if (result.stop_reason === "max_tokens") toast("글이 너무 길어 중간에 끊겼어요. 분량을 줄여 다시 시도해 보세요.");
       setStatus(`<span class="spin"></span>이미지 그리고 사진 찾는 중…`);
       const parsed = await finishResult(raw, { sources, topic: body.topic });
       if (!parsed.title || !parsed.body) setStatus("결과 형식이 조금 달라요. 그대로 쓰거나 다시 만들어 보세요.", true);
@@ -771,10 +842,7 @@
     st.className = "status";
     st.innerHTML = `<span class="spin"></span>매물을 정리하는 중…`;
     try {
-      const res = await fetch("/api/listings", { method: "POST", headers: headers(), body: JSON.stringify({ text }) });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || "정리에 실패했어요");
-      const rows = parseMarkdownTable(j.markdown);
+      const rows = parseMarkdownTable(await api.listings(text));
       if (!rows) throw new Error("표를 읽지 못했어요. 텍스트를 확인하고 다시 시도해 주세요.");
       listingRows = rows;
       renderListing();
