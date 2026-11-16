@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>메디넷 블로그 스튜디오</title>
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="styles.css">
+<script>
+/* index.html 을 파일로 직접 열면(file://) 서버 기능이 동작하지 않으므로 안내하고, 서버가 켜져 있으면 자동으로 이동합니다 */
+if (location.protocol === "file:") {
+  window.FILE_MODE = true;
+  var SERVER = "http://localhost:3300/";
+  var tryServer = function () {
+    fetch(SERVER + "api/status", { mode: "no-cors", cache: "no-store" })
+      .then(function () { location.replace(SERVER); })
+      .catch(function () {});
+  };
+  tryServer();
+  setInterval(tryServer, 3000);
+  document.addEventListener("DOMContentLoaded", function () {
+    var g = document.createElement("div");
+    g.innerHTML =
+      '<div style="position:fixed;inset:0;z-index:9999;background:#0B2A5B;display:grid;place-items:center;padding:16px;font-family:\'Malgun Gothic\',sans-serif">' +
+      '<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:32px;text-align:center;color:#0F1B2D;line-height:1.7">' +
+      '<img src="logo.png" alt="메디넷 부동산" style="width:140px;margin-bottom:12px">' +
+      '<h1 style="font-size:22px;margin:0 0 10px">블로그 스튜디오는 이렇게 여세요</h1>' +
+      '<p style="margin:0 0 18px;color:#56637C">이 파일(index.html)을 직접 열면 글쓰기가 동작하지 않아요.</p>' +
+      '<ol style="text-align:left;margin:0 0 20px;padding-left:22px">' +
+      '<li><b>블로그3</b> 폴더의 <b>start.bat</b> 을 더블클릭하세요.</li>' +
+      '<li>까만 창이 뜨면 그대로 두세요. (닫으면 꺼집니다)</li>' +
+      '<li>잠시 후 이 화면이 <b>자동으로</b> 블로그 스튜디오로 바뀝니다.</li></ol>' +
+      '<a href="' + SERVER + '" style="display:inline-block;background:#1A4FB0;color:#fff;text-decoration:none;font-weight:700;border-radius:10px;padding:12px 22px">localhost:3300 열기</a>' +
+      '<p style="margin:16px 0 0;font-size:13px;color:#8C97AC">서버를 기다리는 중… 켜지면 자동으로 이동합니다</p>' +
+      "</div></div>";
+    document.body.appendChild(g);
+  });
+}
+</script>
+</head>
+<body>
+<div class="app">
+  <!-- 사이드바 -->
+  <aside class="side" id="side">
+    <div class="brand">
+      <div class="brand-logo"><img src="logo.png" alt="메디넷 부동산 로고"></div>
+      <div class="brand-text"><b>블로그 스튜디오</b><small id="brandOffice">메디넷 부동산</small></div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item on" data-page="blog"><span class="ico">✍</span>블로그 글쓰기</button>
+      <button class="nav-item" data-page="listing"><span class="ico">▦</span>매물 정리</button>
+      <button class="nav-item" data-page="history"><span class="ico">⟲</span>작성 기록 <span class="count" id="histCount">0</span></button>
+      <button class="nav-item" data-page="settings"><span class="ico">⚙</span>설정</button>
+    </nav>
+
+    <div class="side-stats">
+      <div><b id="statPosts">0</b><span>작성한 글</span></div>
+      <div><b id="statImages">0</b><span>만든 이미지</span></div>
+      <div><b id="statListings">0</b><span>정리한 매물</span></div>
+    </div>
+
+    <div class="side-foot" id="sideOffice"></div>
+  </aside>
+
+  <main class="main">
+    <header class="top">
+      <button class="menu-btn" id="menuBtn" aria-label="메뉴">☰</button>
+      <div class="top-title"><h1 id="pageTitle">블로그 글쓰기</h1><p id="pageDesc">주제와 내 경험을 넣으면 글과 내용에 맞는 이미지를 함께 만듭니다.</p></div>
+      <span class="pill" id="keyPill">확인 중…</span>
+    </header>
+
+    <!-- 1. 블로그 글쓰기 -->
+    <section class="page" id="page-blog">
+      <div class="grid">
+        <form class="card form" id="blogForm" autocomplete="off">
+          <div class="card-head"><h2>제목만 넣으세요</h2><p>글·이미지·사진·태그까지 빈칸 없이 완성됩니다.</p></div>
+
+          <label class="field">
+            <span>제목 (주제) <em class="req">필수</em></span>
+            <input name="topic" id="topic" placeholder="예) 마포구 신혼부부 첫 전세, 계약 전 꼭 확인할 5가지" required>
+          </label>
+
+          <details class="more">
+            <summary>더 자세히 넣기 (선택) — 키워드 · 독자 · 내 경험 · 매물 · 말투 · 분량</summary>
+            <label class="field">
+              <span>핵심 키워드</span>
+              <input name="keywords" placeholder="비우면 제목에서 알아서 뽑습니다">
+            </label>
+            <label class="field">
+              <span>독자와 상황 (누가, 언제, 왜 찾나요?)</span>
+              <input name="audience" placeholder="예) 결혼 3개월 앞두고 망원·합정 전세를 처음 알아보는 30대 부부">
+            </label>
+            <label class="field">
+              <span>내 경험 메모 <small>(있으면 글이 더 좋아져요)</small></span>
+              <textarea name="experience" rows="4" placeholder="예) 올해 망원동 투룸 전세 상담 중 선순위 근저당 때문에 계약을 보류한 경우가 여러 번 있었음."></textarea>
+            </label>
+            <label class="field">
+              <span>매물 자료 <small>(매물 정리 결과를 붙이면 그 사실만 사용)</small></span>
+              <textarea name="listings" id="listingsInput" rows="4" placeholder="매물 정리 화면에서 '블로그 글에 넣기'를 누르면 자동으로 채워집니다."></textarea>
+            </label>
+            <div class="row3">
+              <label class="field"><span>말투</span>
+                <select name="tone">
+                  <option value="expert">현장 전문가 (~합니다)</option>
+                  <option value="friendly">친근한 동네 중개사 (~해요)</option>
+                  <option value="review">경험 후기형 (~했어요)</option>
+                </select>
+              </label>
+              <label class="field"><span>분량</span>
+                <select name="length">
+                  <option value="short">짧게 (약 2,000자)</option>
+                  <option value="medium" selected>보통 (약 3,500자)</option>
+                  <option value="long">길게 (5,000자+)</option>
+                </select>
+              </label>
+              <label class="field"><span>대가 표시</span>
+                <select name="disclosure">
+                  <option value="none">해당 없음</option>
+                  <option value="own">내돈내산</option>
+                  <option value="sponsored">업체 지원</option>
+                </select>
+              </label>
+            </div>
+            <label class="field">
+              <span>추가 요청</span>
+              <input name="extra" placeholder="예) 마지막에 계약 당일 체크리스트 표를 넣어 주세요">
+            </label>
+          </details>
+
+          <label class="switch">
+            <input type="checkbox" name="webSearch" id="webSearch" checked>
+            <span class="track"></span>
+            <span>최신 자료 웹 검색 <small>통계·제도를 실제 출처로 확인하고 링크를 답니다</small></span>
+          </label>
+
+          <div class="form-actions">
+            <button type="submit" class="btn primary big" id="genBtn">자동으로 완성하기</button>
+            <button type="button" class="btn ghost" id="stopBtn" hidden>멈추기</button>
+          </div>
+          <p class="status" id="genStatus" role="status"></p>
+        </form>
+
+        <div class="result-col">
+          <div class="card empty" id="emptyState">
+            <div class="empty-art"><img src="logo.png" alt=""></div>
+            <h2>글을 만들면 여기에 미리보기가 나옵니다</h2>
+            <p>본문 흐름에 맞춰 대표 이미지·통계·단계·비교표·체크리스트와 상업적 이용이 가능한 사진이 메디넷 부동산 로고와 함께 자동으로 들어갑니다.</p>
+            <button class="btn ghost" id="demoBtn" type="button">예시로 미리보기</button>
+          </div>
+
+          <div class="card result" id="result" hidden>
+            <div class="result-bar">
+              <div class="steps-guide">
+                <a class="btn small naver" href="https://blog.naver.com/GoBlogWrite.naver" target="_blank" rel="noopener">네이버 글쓰기 열기 ↗</a>
+              </div>
+              <div class="bar-actions">
+                <button class="btn small primary" data-copy="title">① 제목 복사</button>
+                <button class="btn small primary" id="pasteHelperBtn">② 본문+이미지 붙여넣기</button>
+                <button class="btn small primary" data-copy="tags">③ 태그 복사</button>
+                <button class="btn small" id="saveAllBtn" title="이미지를 파일로 받아 두고 싶을 때">이미지 파일 저장</button>
+              </div>
+            </div>
+
+            <div class="title-box">
+              <small>제목</small>
+              <h2 id="outTitle"></h2>
+              <small>메타 설명 <span id="metaLen"></span></small>
+              <p id="outMeta"></p>
+            </div>
+
+            <article class="post" id="outBody"></article>
+
+            <div class="sub-box" id="tagsBox" hidden>
+              <h3>태그</h3>
+              <div class="tags" id="outTags"></div>
+            </div>
+            <div class="sub-box" id="sourcesBox" hidden>
+              <h3>본문에 인용한 출처 <small>(링크를 눌러 내용을 한 번 확인해 주세요)</small></h3>
+              <ol id="outSources"></ol>
+            </div>
+            <div class="sub-box" id="checkBox" hidden>
+              <h3>AI 브리핑 기준 점검 <small>(프롬프트 10·11번)</small></h3>
+              <ul class="checks" id="outCheck"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 매물 정리 -->
+    <section class="page" id="page-listing" hidden>
+      <div class="card">
+        <div class="card-head">
+          <h2>매물 텍스트 붙여 넣기</h2>
+          <p>부동산뱅크·선방·매경부동산·피터팬 등에서 복사한 매물 글을 그대로 붙여 넣으면 “1매물 = 1행” 표로 정리합니다.</p>
+        </div>
+        <textarea id="listingText" rows="10" placeholder="매물 광고 텍스트를 여러 개 한꺼번에 붙여 넣어도 됩니다."></textarea>
+        <div class="form-actions">
+          <button class="btn primary big" id="listingBtn">표로 정리하기</button>
+          <p class="status" id="listingStatus" role="status"></p>
+        </div>
+      </div>
+      <div class="card" id="listingResult" hidden>
+        <div class="card-head row">
+          <h2>정리 결과 <small id="listingCount"></small></h2>
+          <div class="bar-actions">
+            <button class="btn small" id="copyTableBtn">표 복사 (엑셀용)</button>
+            <button class="btn small" id="csvBtn">CSV 저장</button>
+            <button class="btn small primary" id="toBlogBtn">블로그 글에 넣기 →</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="data" id="listingTable"></table></div>
+      </div>
+    </section>
+
+    <!-- 3. 작성 기록 -->
+    <section class="page" id="page-history" hidden>
+      <div class="card">
+        <div class="card-head row"><h2>최근 작성한 글 <small>(이 PC 브라우저에 최근 20개 저장)</small></h2></div>
+        <ul class="history" id="historyList"></ul>
+      </div>
+    </section>
+
+    <!-- 4. 설정 -->
+    <section class="page" id="page-settings" hidden>
+      <form class="card form narrow" id="settingsForm">
+        <div class="card-head"><h2>API 키</h2><p>Anthropic API 키(sk-ant-…)는 이 PC 브라우저에만 저장됩니다.</p></div>
+        <label class="field"><span>Anthropic API 키</span><input type="password" name="apiKey" placeholder="sk-ant-..."></label>
+        <label class="field"><span>Pexels API 키 <small>(선택 · 더 고화질 사진. pexels.com/api 에서 무료 발급, 비우면 상업적 이용 가능한 CC 사진을 찾아 출처를 표시합니다)</small></span><input type="password" name="pexelsKey" placeholder="비워 두어도 됩니다"></label>
+
+        <div class="card-head"><h2>사무소 정보</h2><p>글 마지막 상담 안내와 이미지 하단 띠에 들어갑니다.</p></div>
+        <label class="field"><span>상호</span><input name="name" placeholder="메디넷 부동산"></label>
+        <label class="field"><span>전화</span><input name="phone" placeholder="02-3141-8838"></label>
+        <label class="field"><span>주소</span><input name="address" placeholder="마포구 동교로 253"></label>
+        <div class="form-actions"><button class="btn primary" type="submit">저장</button><span class="status" id="settingsStatus"></span></div>
+        <p class="hint" id="promptInfo"></p>
+      </form>
+    </section>
+  </main>
+</div>
+
+<input type="file" accept="image/*" id="photoInput" hidden>
+<div class="toast" id="toast" role="status"></div>
+
+<!-- ② 붙여넣기 도우미: 글과 이미지를 한 조각씩 복사 -->
+<div class="paste-helper" id="pasteHelper" hidden>
+  <div class="ph-head"><b>② 본문 붙여넣기 도우미</b><span id="phStep">1 / 1</span><button class="ph-x" id="phClose" aria-label="닫기">✕</button></div>
+  <div class="ph-bar"><span id="phProg"></span></div>
+  <p class="ph-msg" id="phMsg" role="status"></p>
+  <p class="ph-tip">네이버 창과 이 창을 나란히 띄워 두면 편해요. 붙여 넣은 뒤 여기서 다음을 누르세요.</p>
+  <div class="ph-acts">
+    <button class="btn ghost" id="phAgain">다시 복사</button>
+    <button class="btn primary big" id="phNext">다음</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="images.js"></script>
+<script src="demo.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

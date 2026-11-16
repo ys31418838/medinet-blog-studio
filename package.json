@@ -1,0 +1,14 @@
+{
+  "name": "medinet-blog-studio",
+  "version": "1.0.0",
+  "description": "메디넷 부동산 블로그 스튜디오 - 주제와 경험 메모로 네이버 블로그 글과 내용 맞춤 이미지를 만들고, 매물 텍스트를 표로 정리하는 내 PC용 웹사이트",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "express": "^4.21.2"
+  }
+}

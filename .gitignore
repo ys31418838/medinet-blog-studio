@@ -1,0 +1,7 @@
+# 설치 파일 (start.bat 이 자동으로 설치)
+node_modules/
+# API 키가 들어가는 파일
+.env
+# 이 PC 전용 설정
+.claude/
+*.log
