@@ -318,6 +318,7 @@
       cap.insertAdjacentHTML("beforeend", `<span class="kind">${KIND_LABEL[spec.kind] || spec.kind || ""}</span>
         <span class="acts">
           <button class="btn small" data-act="save" type="button">저장</button>
+          ${spec.kind === "cover" ? `<button class="btn small" data-act="design" type="button">다른 디자인</button>` : ""}
           <button class="btn small" data-act="next" type="button" hidden>다른 사진</button>
           <button class="btn small" data-act="photo" type="button">내 사진으로</button>
           <button class="btn small" data-act="reset" type="button" hidden>되돌리기</button>
@@ -347,8 +348,9 @@
           const img = await loadImg(api.imgUrl(src));
           if (img.width < 400) continue;
           slot.canvas = slot.spec.kind === "cover"
-            ? await MedinetImages.render(slot.spec, office(), img)
+            ? await MedinetImages.render({ ...slot.spec, variant: slot.variant }, office(), img)
             : await MedinetImages.renderPhoto(slot.spec, office(), img);
+          slot.bg = img;
           slot.pi = i;
           slot.credit = list[i].credit;
           return true;
@@ -369,7 +371,8 @@
     }
     // 사진을 못 찾으면 빈칸 대신 설명 카드로 채웁니다
     slot.credit = null;
-    const s = spec.kind === "photo" ? { ...spec, kind: "tip", text: spec.caption || spec.title } : spec;
+    slot.bg = null;
+    const s = spec.kind === "photo" ? { ...spec, kind: "tip", text: spec.caption || spec.title } : { ...spec, variant: slot.variant };
     slot.canvas = await MedinetImages.render(s, office());
   }
 
@@ -432,6 +435,14 @@
       btn.textContent = "다른 사진";
       showSlot(fig, slot);
     }
+    if (btn.dataset.act === "design") {
+      // 같은 사진으로 배치·색만 바꿔 다시 그립니다
+      slot.variant = (slot.variant || 0) + 1;
+      const spec = { ...slot.spec, variant: slot.variant };
+      if (slot.photo && slot.userImg) slot.photo = await MedinetImages.render(spec, office(), slot.userImg);
+      slot.canvas = await MedinetImages.render(spec, office(), slot.bg || undefined);
+      showSlot(fig, slot);
+    }
     if (btn.dataset.act === "photo") {
       photoTarget = { fig, slot };
       $("#photoInput").value = "";
@@ -447,9 +458,12 @@
     if (!file || !photoTarget) return;
     const img = new Image();
     img.onload = async () => {
-      photoTarget.slot.photo = await MedinetImages.renderPhoto(photoTarget.slot.spec, office(), img);
+      const t = photoTarget.slot;
+      t.userImg = img;
+      t.photo = t.spec.kind === "cover"
+        ? await MedinetImages.render({ ...t.spec, variant: t.variant }, office(), img) // 내 사진도 대표 이미지 디자인으로
+        : await MedinetImages.renderPhoto(t.spec, office(), img);
       showSlot(photoTarget.fig, photoTarget.slot);
-      URL.revokeObjectURL(img.src);
       toast("사진에 로고를 넣었어요");
     };
     img.onerror = () => toast("이미지 파일을 열 수 없습니다");
@@ -491,7 +505,10 @@
   async function finishResult(raw, { sources = [], topic = "", save = true } = {}) {
     sources = bodySources(raw, sources);
     const parsed = showResult(raw, { sources });
-    current = { raw, parsed, sources, topic, slots: new Map(parsed.images.map((s) => [Number(s.id), { spec: s, canvas: null, photo: null }])) };
+    current = {
+      raw, parsed, sources, topic,
+      slots: new Map(parsed.images.map((s) => [Number(s.id), { spec: s.kind === "cover" ? { ...s, topic: parsed.title || topic } : s, canvas: null, photo: null, variant: 0 }])),
+    };
     await drawSlots();
     if (save && parsed.title) {
       history.unshift({ id: Date.now(), at: new Date().toISOString(), topic, title: parsed.title, raw, sources });

@@ -130,51 +130,367 @@
     ctx.drawImage(logo, right - bw + pad, cy - logoH / 2, lw, logoH);
   }
 
-  const kinds = {
-    cover(ctx, spec, office, logo, photo) {
+  // ── 대표 이미지(cover): 제목에 따라 색·배치가 달라집니다 ──
+  // 주제별 색 조합 (bg1·bg2 배경, accent 강조색, sub 부제 색)
+  const THEMES = {
+    blue: { bg1: "#0B2A5B", bg2: "#1A4FB0", accent: "#FF7A3D", sub: "#BFD3F7", rgb: "11,42,91" },
+    gold: { bg1: "#14213D", bg2: "#2B4677", accent: "#F2B33D", sub: "#F5E6C4", rgb: "20,33,61" },
+    teal: { bg1: "#0B4F4A", bg2: "#14857A", accent: "#FFC857", sub: "#C8F1EA", rgb: "11,79,74" },
+    charcoal: { bg1: "#1F2933", bg2: "#3E4C59", accent: "#FF7A45", sub: "#FFD9C7", rgb: "31,41,51" },
+    plum: { bg1: "#3A1F5D", bg2: "#5B3A8C", accent: "#FFB347", sub: "#E3D4FA", rgb: "58,31,93" },
+    wine: { bg1: "#5A1A2B", bg2: "#8C2F45", accent: "#FFD166", sub: "#F8D5DC", rgb: "90,26,43" },
+  };
+  const THEME_RULES = [
+    ["plum", /세금|양도세|취득세|보유세|종부세|재산세|대출|금리|DSR|LTV|법률|법원|소송|등기|특약|분쟁/],
+    ["charcoal", /상가|사무실|오피스|창업|권리금|점포|공장|지식산업|임장/],
+    ["teal", /신혼|가족|아이|학군|학교|이사|동네|생활|산책|공원|인테리어|반려/],
+    ["gold", /매매|투자|시세|청약|분양|재건축|재개발|갭|수익|경매|급매|호가|실거래/],
+    ["wine", /사기|주의|위험|함정|실수|피해|경고|조심/],
+    ["blue", /전세|월세|원룸|투룸|오피스텔|보증금|임대|임차|반전세|계약/],
+  ];
+  const LAYOUTS = ["left", "bottom", "split", "center", "card", "number"];
+
+  function hashStr(s) {
+    let h = 2166136261;
+    for (const ch of String(s)) h = Math.imul(h ^ ch.codePointAt(0), 16777619);
+    return h >>> 0;
+  }
+  // 제목 속 '7단계', '5가지', 'TOP 3' 같은 숫자
+  function bigNumber(text) {
+    const m = String(text || "").match(/(\d{1,2})\s*(가지|단계|곳|개|선|분|일|억|%|대|년|평)/) || String(text || "").match(/TOP\s*(\d{1,2})/i);
+    return m ? { n: m[1], unit: m[2] || "" } : null;
+  }
+  function coverStyle(spec) {
+    const text = `${spec.title || ""} ${spec.subtitle || ""} ${spec.topic || ""}`;
+    const h = hashStr(spec.title || "");
+    const v = Number(spec.variant) || 0;
+    const num = bigNumber(spec.title) || bigNumber(spec.topic);
+    const pool = num ? LAYOUTS : LAYOUTS.filter((l) => l !== "number");
+    const hinted = pool.indexOf(spec.layout);
+    const base = hinted >= 0 ? hinted : h % pool.length;
+    const layout = pool[(base + v) % pool.length];
+    const names = Object.keys(THEMES);
+    // 표지 문구에서 먼저 찾고, 없으면 부제·글 제목에서 찾습니다
+    const rule = THEME_RULES.find(([, re]) => re.test(spec.title || "")) || THEME_RULES.find(([, re]) => re.test(text));
+    let ti = rule ? names.indexOf(rule[0]) : (h >>> 8) % names.length;
+    ti = (ti + Math.floor((base + v) / pool.length)) % names.length; // 배치를 한 바퀴 다 돌면 색도 바꿈
+    return { layout, t: THEMES[names[ti]], num };
+  }
+
+  // 사진을 (x,y,w,h) 영역에 꽉 차게
+  function drawPhotoFill(ctx, photo, x, y, w, h) {
+    const s = Math.max(w / photo.width, h / photo.height);
+    const dw = photo.width * s, dh = photo.height * s;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+    ctx.drawImage(photo, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+    ctx.restore();
+  }
+  // 사진이 없을 때 배경: 그라데이션 + 레이아웃마다 다른 무늬
+  function drawPlainBg(ctx, t, x, y, w, h, seed) {
+    const g = ctx.createLinearGradient(x, y, x + w, y + h);
+    g.addColorStop(0, t.bg1);
+    g.addColorStop(1, t.bg2);
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, w, h);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,.08)";
+    ctx.fillStyle = "rgba(255,255,255,.06)";
+    const kind = seed % 3;
+    if (kind === 0) {
+      ctx.lineWidth = 60;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.62, y + h + 20); ctx.lineTo(x + w * 0.84, y + h * 0.4); ctx.lineTo(x + w * 1.05, y + h + 20);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.5, y + h + 20); ctx.lineTo(x + w * 0.7, y + h * 0.6); ctx.lineTo(x + w * 0.9, y + h + 20);
+      ctx.stroke();
+    } else if (kind === 1) {
+      // 건물 실루엣
+      let bx = x + w * 0.5;
+      let i = 0;
+      while (bx < x + w) {
+        const bw = 60 + ((seed >> i) % 5) * 18;
+        const bh = h * (0.25 + (((seed >> (i + 3)) % 7) / 14));
+        ctx.fillRect(bx, y + h - bh, bw - 10, bh);
+        bx += bw;
+        i++;
+      }
+    } else {
+      for (let r = 120; r < 900; r += 110) {
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(x + w * 0.9, y + h * 0.15, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+  function shade(ctx, x, y, w, h, rgb, a0, a1, dir = "h") {
+    const g = dir === "h" ? ctx.createLinearGradient(x, 0, x + w, 0) : ctx.createLinearGradient(0, y, 0, y + h);
+    g.addColorStop(0, `rgba(${rgb},${a0})`);
+    g.addColorStop(1, `rgba(${rgb},${a1})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, w, h);
+  }
+  // 꼬리표 (예: 2026 최신, 계약 전 필독)
+  function drawBadge(ctx, text, x, y, bg, fg, align = "left", size = 24) {
+    if (!text) return 0;
+    ctx.font = f(size, 800);
+    const w = ctx.measureText(text).width + size * 1.3, h = size * 1.8;
+    const bx = align === "center" ? x - w / 2 : x;
+    ctx.fillStyle = bg;
+    rr(ctx, bx, y, w, h, h / 2);
+    ctx.fill();
+    ctx.fillStyle = fg;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    ctx.fillText(text, bx + w / 2, y + h / 2 + 1);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    return h;
+  }
+  // 제목 줄바꿈은 낱말 단위 (한 낱말이 너무 길 때만 글자 단위)
+  function fitTitle(ctx, text, maxWidth, maxLines, start, min) {
+    for (let s = start; s >= min; s -= 2) {
+      ctx.font = f(s, 800);
+      const lines = wrapWords(ctx, text, maxWidth);
+      if (lines.length <= maxLines && lines.every((l) => ctx.measureText(l).width <= maxWidth)) return { size: s, lines };
+    }
+    return fitFont(ctx, text, maxWidth, maxLines, min, min, 800);
+  }
+  function wrapWords(ctx, text, maxWidth) {
+    const words = String(text ?? "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+    const lines = [];
+    let cur = "";
+    for (const w of words) {
+      const next = cur ? `${cur} ${w}` : w;
+      if (!cur || ctx.measureText(next).width <= maxWidth) cur = next;
+      else { lines.push(cur); cur = w; }
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  }
+  // 강조 낱말만 색을 바꿔 그립니다
+  function drawRichLines(ctx, lines, x, y, lh, color, hiColor, highlight, align = "left") {
+    const hi = String(highlight || "").trim();
+    lines.forEach((line, li) => {
+      const parts = hi && line.includes(hi) ? line.split(hi).flatMap((p, i, arr) => (i < arr.length - 1 ? [p, hi] : [p])) : [line];
+      const total = ctx.measureText(line).width;
+      let cx = align === "center" ? x - total / 2 : x;
+      parts.forEach((p) => {
+        if (!p) return;
+        ctx.fillStyle = hi && p === hi ? hiColor : color;
+        ctx.fillText(p, cx, y + li * lh);
+        cx += ctx.measureText(p).width;
+      });
+    });
+    return y + (lines.length - 1) * lh;
+  }
+  function defaultBadge(spec) {
+    if (spec.badge) return String(spec.badge).slice(0, 14);
+    const y = String(spec.title || "").match(/20\d\d/);
+    return y ? `${y[0]} 최신` : "";
+  }
+
+  function drawCover(ctx, spec, office, logo, photo) {
+    const { layout, t, num } = coverStyle(spec);
+    const seed = hashStr(spec.title || "");
+    const badge = defaultBadge(spec);
+    const title = spec.title || "";
+    const hi = spec.highlight;
+    const offLine = officeLine(office);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+
+    if (layout === "left") {
       if (photo) {
-        // 찾은 사진을 배경으로 깔고 진한 블루를 덮어 글자가 잘 보이게
-        const s = Math.max(W / photo.width, H / photo.height);
-        ctx.drawImage(photo, (W - photo.width * s) / 2, (H - photo.height * s) / 2, photo.width * s, photo.height * s);
-        const g = ctx.createLinearGradient(0, 0, W, 0);
-        g.addColorStop(0, "rgba(11,42,91,.94)");
-        g.addColorStop(0.62, "rgba(11,42,91,.78)");
-        g.addColorStop(1, "rgba(26,79,176,.35)");
-        ctx.fillStyle = g;
-        ctx.fillRect(0, 0, W, H);
-      } else {
-        const g = ctx.createLinearGradient(0, 0, W, H);
-        g.addColorStop(0, C.navy);
-        g.addColorStop(1, C.primary);
-        ctx.fillStyle = g;
-        ctx.fillRect(0, 0, W, H);
-        // 장식: 지붕 모양 선
-        ctx.strokeStyle = "rgba(255,255,255,.07)";
-        ctx.lineWidth = 60;
-        ctx.beginPath();
-        ctx.moveTo(760, 820); ctx.lineTo(1010, 330); ctx.lineTo(1260, 820);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(600, 820); ctx.lineTo(850, 480); ctx.lineTo(1100, 820);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = C.accent;
-      rr(ctx, 80, 120, 90, 8, 4);
-      ctx.fill();
-
-      ctx.fillStyle = C.white;
-      const t = fitFont(ctx, spec.title || "", 900, 3, 76, 50, 800);
-      let y = drawLines(ctx, t.lines, 80, 210 + t.size * 0.2, t.size * 1.25);
+        drawPhotoFill(ctx, photo, 0, 0, W, H);
+        shade(ctx, 0, 0, W, H, t.rgb, 0.95, 0.3);
+      } else drawPlainBg(ctx, t, 0, 0, W, H, seed);
+      let y = 110;
+      y += drawBadge(ctx, badge, 80, y, t.accent, t.bg1) + 36;
+      const tt = fitTitle(ctx, title, 860, 3, 84, 52);
+      const last = drawRichLines(ctx, tt.lines, 80, y + tt.size * 0.85, tt.size * 1.22, "#fff", t.accent, hi);
       if (spec.subtitle) {
-        ctx.fillStyle = C.sky;
-        const s = fitFont(ctx, spec.subtitle, 880, 2, 34, 26, 500);
-        drawLines(ctx, s.lines, 80, y + 30, s.size * 1.4);
+        const s = fitFont(ctx, spec.subtitle, 820, 2, 34, 26, 500);
+        ctx.fillStyle = t.sub;
+        drawLines(ctx, s.lines, 80, last + s.size + 40, s.size * 1.4);
       }
-      drawLogoBadge(ctx, logo, W - 80, H - 130, 120);
+      drawLogoBadge(ctx, logo, W - 80, H - 120, 110);
       ctx.fillStyle = "rgba(255,255,255,.85)";
       ctx.font = f(22, 600);
-      ctx.fillText(wrap(ctx, officeLine(office), 700, 1)[0] || "", 80, H - 80);
+      ctx.fillText(wrap(ctx, offLine, 700, 1)[0] || "", 80, H - 72);
+    }
+
+    if (layout === "bottom") {
+      // 위 사진, 아래 색 띠 (잡지 표지형)
+      const py = 470;
+      if (photo) drawPhotoFill(ctx, photo, 0, 0, W, py);
+      else drawPlainBg(ctx, t, 0, 0, W, py, seed);
+      shade(ctx, 0, 0, W, 160, "0,0,0", 0.35, 0, "v");
+      ctx.fillStyle = t.bg1;
+      ctx.fillRect(0, py, W, H - py);
+      ctx.fillStyle = t.accent;
+      ctx.fillRect(0, py, W, 10);
+      drawLogoBadge(ctx, logo, W - 50, 80, 76);
+      if (badge) drawBadge(ctx, badge, 70, py - 30, t.accent, t.bg1, "left", 26);
+      const tt = fitTitle(ctx, title, W - 140, 2, 72, 46);
+      const last = drawRichLines(ctx, tt.lines, 70, py + 60 + tt.size * 0.9, tt.size * 1.2, "#fff", t.accent, hi);
+      if (spec.subtitle && last + 70 < H - 60) {
+        ctx.font = f(28, 500);
+        ctx.fillStyle = t.sub;
+        ctx.fillText(wrap(ctx, spec.subtitle, W - 140, 1)[0], 70, last + 58);
+      }
+      ctx.font = f(20, 600);
+      ctx.fillStyle = "rgba(255,255,255,.7)";
+      ctx.fillText(wrap(ctx, offLine, W - 140, 1)[0] || "", 70, H - 32);
+    }
+
+    if (layout === "split") {
+      // 왼쪽 색 면 + 오른쪽 사진 (비스듬한 경계)
+      drawPlainBg(ctx, t, 0, 0, W, H, seed + 1);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(640, 0); ctx.lineTo(W, 0); ctx.lineTo(W, H); ctx.lineTo(520, H); ctx.closePath();
+      ctx.clip();
+      if (photo) drawPhotoFill(ctx, photo, 520, 0, W - 520, H);
+      else drawPlainBg(ctx, { ...t, bg1: t.bg2, bg2: t.bg1 }, 520, 0, W - 520, H, seed + 2);
+      ctx.restore();
+      ctx.strokeStyle = t.accent;
+      ctx.lineWidth = 12;
+      ctx.beginPath();
+      ctx.moveTo(640, 0); ctx.lineTo(520, H);
+      ctx.stroke();
+      let y = 90;
+      y += drawBadge(ctx, badge, 70, y, t.accent, t.bg1) + 34;
+      const tt = fitTitle(ctx, title, 500, 4, 70, 44);
+      const last = drawRichLines(ctx, tt.lines, 70, y + tt.size * 0.85, tt.size * 1.22, "#fff", t.accent, hi);
+      if (spec.subtitle) {
+        const s = fitFont(ctx, spec.subtitle, 460, 2, 28, 22, 500);
+        ctx.fillStyle = t.sub;
+        drawLines(ctx, s.lines, 70, last + s.size + 36, s.size * 1.4);
+      }
+      drawLogoBadge(ctx, logo, 70 + 190, H - 150, 80);
+      ctx.fillStyle = "rgba(255,255,255,.75)";
+      ctx.font = f(18, 600);
+      ctx.fillText(wrap(ctx, office?.phone || "", 300, 1)[0] || "", 70, H - 40);
+    }
+
+    if (layout === "center") {
+      if (photo) {
+        drawPhotoFill(ctx, photo, 0, 0, W, H);
+        ctx.fillStyle = `rgba(${t.rgb},.72)`;
+        ctx.fillRect(0, 0, W, H);
+      } else drawPlainBg(ctx, t, 0, 0, W, H, seed + 2);
+      const tt = fitTitle(ctx, title, 1000, 3, 86, 52);
+      const lh = tt.size * 1.22;
+      const sub = spec.subtitle ? (ctx.font = f(32, 500), wrap(ctx, spec.subtitle, 900, 1)) : [];
+      const blockH = 60 + tt.lines.length * lh + (sub.length ? 70 : 0);
+      let y = (H - 90 - blockH) / 2 + 20;
+      if (badge) drawBadge(ctx, badge, W / 2, y - 20, t.accent, t.bg1, "center");
+      y += 60;
+      ctx.font = f(tt.size, 800);
+      const last = drawRichLines(ctx, tt.lines, W / 2, y + tt.size * 0.85, lh, "#fff", t.accent, hi, "center");
+      ctx.fillStyle = t.accent;
+      rr(ctx, W / 2 - 50, last + 34, 100, 8, 4);
+      ctx.fill();
+      if (sub.length) {
+        ctx.font = f(32, 500);
+        ctx.fillStyle = t.sub;
+        ctx.textAlign = "center";
+        ctx.fillText(sub[0], W / 2, last + 100);
+        ctx.textAlign = "left";
+      }
+      ctx.fillStyle = "rgba(0,0,0,.25)";
+      ctx.fillRect(0, H - 90, W, 90);
+      ctx.font = f(21, 600);
+      ctx.fillStyle = "rgba(255,255,255,.9)";
+      ctx.fillText(wrap(ctx, offLine, 820, 1)[0] || "", 50, H - 45 + 8);
+      drawLogoBadge(ctx, logo, W - 40, H - 45, 58);
+    }
+
+    if (layout === "card") {
+      // 사진 위 흰 카드 (포스터형)
+      if (photo) {
+        drawPhotoFill(ctx, photo, 0, 0, W, H);
+        ctx.fillStyle = "rgba(0,0,0,.25)";
+        ctx.fillRect(0, 0, W, H);
+      } else drawPlainBg(ctx, t, 0, 0, W, H, seed);
+      const cx = 110, cy = 150, cw = W - 220, ch = 440;
+      ctx.shadowColor = "rgba(0,0,0,.3)";
+      ctx.shadowBlur = 40;
+      ctx.fillStyle = "#fff";
+      rr(ctx, cx, cy, cw, ch, 26);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = t.accent;
+      rr(ctx, cx, cy, 16, ch, 8);
+      ctx.fill();
+      if (badge) drawBadge(ctx, badge, cx + 60, cy - 26, t.bg1, "#fff", "left", 24);
+      const tt = fitTitle(ctx, title, cw - 130, 3, 74, 46);
+      const lh = tt.size * 1.22;
+      const sub = spec.subtitle ? (ctx.font = f(30, 500), wrap(ctx, spec.subtitle, cw - 130, 1)) : [];
+      const blockH = tt.lines.length * lh + (sub.length ? 60 : 0);
+      const y0 = cy + (ch - blockH) / 2 + tt.size * 0.85;
+      ctx.font = f(tt.size, 800);
+      const last = drawRichLines(ctx, tt.lines, cx + 70, y0, lh, t.bg1, t.accent, hi);
+      if (sub.length) {
+        ctx.font = f(30, 500);
+        ctx.fillStyle = "#56637C";
+        ctx.fillText(sub[0], cx + 70, last + 62);
+      }
+      ctx.fillStyle = t.bg1;
+      ctx.fillRect(0, H - 110, W, 110);
+      ctx.font = f(22, 600);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(wrap(ctx, offLine, 820, 1)[0] || "", 60, H - 48);
+      drawLogoBadge(ctx, logo, W - 50, H - 55, 66);
+    }
+
+    if (layout === "number") {
+      // 큰 숫자 강조형 (예: 7단계, 5가지)
+      if (photo) {
+        drawPhotoFill(ctx, photo, 0, 0, W, H);
+        shade(ctx, 0, 0, W, H, t.rgb, 0.96, 0.55);
+      } else drawPlainBg(ctx, t, 0, 0, W, H, seed + 1);
+      const n = num || { n: "", unit: "" };
+      ctx.font = f(340, 800);
+      ctx.fillStyle = t.accent;
+      const nw = ctx.measureText(n.n).width;
+      ctx.fillText(n.n, 70, 470);
+      if (n.unit) {
+        ctx.font = f(64, 800);
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.fillText(n.unit, 70 + nw / 2, 560);
+        ctx.textAlign = "left";
+      }
+      const tx = Math.max(70 + nw + 60, 420), tw = W - tx - 70;
+      let y = 140;
+      y += drawBadge(ctx, badge, tx, y, "rgba(255,255,255,.16)", "#fff") + 34;
+      const tt = fitTitle(ctx, title, tw, 4, 66, 40);
+      const last = drawRichLines(ctx, tt.lines, tx, y + tt.size * 0.85, tt.size * 1.22, "#fff", t.accent, hi);
+      if (spec.subtitle) {
+        const s = fitFont(ctx, spec.subtitle, tw, 2, 28, 22, 500);
+        ctx.fillStyle = t.sub;
+        drawLines(ctx, s.lines, tx, last + s.size + 32, s.size * 1.4);
+      }
+      drawLogoBadge(ctx, logo, W - 70, H - 110, 96);
+      ctx.fillStyle = "rgba(255,255,255,.85)";
+      ctx.font = f(22, 600);
+      ctx.fillText(wrap(ctx, offLine, 760, 1)[0] || "", 80, H - 66);
+    }
+  }
+
+  const kinds = {
+    cover(ctx, spec, office, logo, photo) {
+      drawCover(ctx, spec, office, logo, photo);
     },
 
     stats(ctx, spec, office, logo) {
@@ -446,5 +762,5 @@
     return canvas;
   }
 
-  window.MedinetImages = { render, renderPhoto, W, H };
+  window.MedinetImages = { render, renderPhoto, coverLayouts: LAYOUTS, W, H };
 })();

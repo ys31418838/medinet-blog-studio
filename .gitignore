@@ -5,3 +5,4 @@ node_modules/
 # 이 PC 전용 설정
 .claude/
 *.log
+*.zip
